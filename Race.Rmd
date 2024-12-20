@@ -1,0 +1,217 @@
+---
+title: "project"
+output: pdf_document
+date: "2024-12-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+if (!require("tidyverse")) install.packages("tidyverse")
+if (!require("lubridate")) install.packages("lubridate")
+if (!require("broom")) install.packages("broom")
+
+
+library(tidyverse)
+library(lubridate)
+library(broom)
+
+```
+
+```{r}
+charlotte_data <- suppressWarnings(read_csv("nc_charlotte_2020_04_01.csv", show_col_types = FALSE))
+raleigh_data <- suppressWarnings(read_csv("nc_raleigh_2020_04_01.csv", show_col_types = FALSE))
+
+
+charlotte_data <- charlotte_data %>%
+  mutate(city = "Charlotte")
+
+raleigh_data <- raleigh_data %>%
+  mutate(city = "Raleigh")
+
+combined_data <- bind_rows(charlotte_data, raleigh_data)
+
+glimpse(combined_data)
+```
+
+```{r, echo=FALSE}
+combined_data <- combined_data %>%
+  mutate(
+    date = ymd(date), 
+    year = year(date), 
+    party_in_power = case_when(
+      year %in% 2000:2000 ~ "Democratic",
+      year %in% 2001:2008 ~ "Republican",  
+      year %in% 2009:2015 ~ "Democratic",  
+      TRUE ~ NA_character_
+    ),
+    search_conducted = as.logical(search_conducted), 
+    contraband_found = as.logical(contraband_found),
+    subject_race = as.factor(subject_race)
+  ) %>%
+  filter(!is.na(subject_race))  
+
+
+glimpse(combined_data)
+sink("output.txt")
+glimpse(combined_data)
+sink()
+
+
+```
+
+```{r}
+# Calculate search and contraband rates
+search_rates <- combined_data %>%
+  group_by(city, subject_race, search_conducted) %>%
+  summarize(count = n(), .groups = "drop") %>%
+  mutate(percentage = count / sum(count) * 100)
+
+contraband_rates <- combined_data %>%
+  filter(search_conducted == TRUE) %>%
+  group_by(city, subject_race, contraband_found) %>%
+  summarize(count = n(), .groups = "drop") %>%
+  mutate(percentage = count / sum(count) * 100)
+
+print(search_rates)
+print(contraband_rates)
+
+```
+
+```{r}
+# Search rates by political affiliation
+search_rates_party <- combined_data %>%
+  group_by(city, party_in_power, subject_race, search_conducted) %>%
+  summarize(count = n(), .groups = "drop") %>%
+  mutate(percentage = count / sum(count) * 100)
+
+# Contraband discovery rates by political affiliation
+contraband_rates_party <- combined_data %>%
+  filter(search_conducted == TRUE) %>%
+  group_by(city, party_in_power, subject_race, contraband_found) %>%
+  summarize(count = n(), .groups = "drop") %>%
+  mutate(percentage = count / sum(count) * 100)
+
+print(search_rates_party)
+print(contraband_rates_party)
+
+```
+
+Let's do a chi-squared test to see if there's a statistically significant association between race and search rates.
+
+```{r}
+# Perform the test separately for each city
+search_test <- combined_data %>%
+  group_by(city, subject_race, search_conducted) %>%
+  summarize(count = n(), .groups = "drop") %>%
+  pivot_wider(names_from = search_conducted, values_from = count, values_fill = 0)
+
+search_test_split <- split(search_test, search_test$city)
+
+results <- lapply(search_test_split, function(city_data) {
+  city_data <- city_data %>%
+    select(-city) %>%
+    column_to_rownames("subject_race")
+  
+  chisq.test(city_data)
+})
+
+results
+
+
+```
+
+Clearly, we notice that there is a significant difference between search rates based on the race of the person involved. Let's do a similar chi squared test and confirm this for whether contraband was found or not.
+
+```{r}
+contraband_test <- combined_data %>%
+  filter(search_conducted == TRUE) %>%
+  group_by(city, subject_race, contraband_found) %>%
+  summarize(count = n(), .groups = "drop") %>%
+  pivot_wider(names_from = contraband_found, values_from = count, values_fill = 0)
+
+contraband_test_split <- split(contraband_test, contraband_test$city)
+
+contraband_results <- lapply(contraband_test_split, function(city_data) {
+  city_data <- city_data %>%
+    select(-city) %>%
+    column_to_rownames("subject_race")
+  
+  suppressWarnings(chisq.test(city_data))
+})
+
+contraband_results
+
+```
+
+We notice that there is a statistical significance in contraband discovery rates too across both cities. This can be visualized and easily digested as seen below.
+
+```{r}
+combined_data %>%
+  group_by(city, subject_race, search_conducted) %>%
+  summarize(count = n(), .groups = "drop") %>%
+  mutate(percentage = count / sum(count) * 100) %>%
+  ggplot(aes(x = subject_race, y = percentage, fill = search_conducted)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~ city) +
+  labs(title = "Search Rates by City and Race", y = "Percentage", x = "Race") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+combined_data %>%
+  filter(search_conducted == TRUE) %>%
+  group_by(city, subject_race, contraband_found) %>%
+  summarize(count = n(), .groups = "drop") %>%
+  mutate(percentage = count / sum(count) * 100) %>%
+  ggplot(aes(x = subject_race, y = percentage, fill = contraband_found)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~ city) +
+  labs(title = "Contraband Discovery Rates by City and Race", y = "Percentage", x = "Race") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+
+```
+
+We now take a look at whether it matters what party was in power. As can be seen below, regardless of what party was in power, there's a significant difference in search rates between the races. This is also confirmed for contraband discovery rates.
+
+```{r}
+# Group data by race, search conducted, and party in power
+search_test_party <- combined_data %>%
+  group_by(party_in_power, subject_race, search_conducted) %>%
+  summarize(count = n(), .groups = "drop") %>%
+  pivot_wider(names_from = search_conducted, values_from = count, values_fill = 0)
+
+search_test_party_split <- split(search_test_party, search_test_party$party_in_power)
+
+search_results_party <- lapply(search_test_party_split, function(party_data) {
+  party_data <- party_data %>%
+    select(-party_in_power) %>%
+    column_to_rownames("subject_race")
+  chisq.test(party_data)
+})
+
+print(search_results_party)
+
+```
+
+```{r}
+contraband_test_party <- combined_data %>%
+  filter(search_conducted == TRUE) %>%
+  group_by(party_in_power, subject_race, contraband_found) %>%
+  summarize(count = n(), .groups = "drop") %>%
+  pivot_wider(names_from = contraband_found, values_from = count, values_fill = 0)
+
+contraband_test_party_split <- split(contraband_test_party, contraband_test_party$party_in_power)
+
+contraband_results_party <- lapply(contraband_test_party_split, function(party_data) {
+  party_data <- party_data %>%
+    select(-party_in_power) %>%
+    column_to_rownames("subject_race")
+  chisq.test(party_data)
+})
+
+print(contraband_results_party)
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

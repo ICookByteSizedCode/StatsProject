@@ -1,0 +1,345 @@
+---
+title: "501_Project_2"
+output:
+  pdf_document: default
+  html_document: default
+date: "2024-12-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+```
+
+```{r}
+cwd <- getwd()
+
+file_path_char <- file.path(cwd, "nc_charlotte_2020_04_01.csv")
+file_path_raleigh <- file.path(cwd, "nc_raleigh_2020_04_01.csv")
+
+charlotte <- read.csv(file_path_char)
+raleigh <- read.csv(file_path_raleigh)
+```
+
+
+```{r}
+summary(charlotte)
+summary(raleigh)
+
+str(charlotte)
+str(raleigh)
+
+nrow(charlotte)
+nrow(raleigh)
+```
+```{r}
+head(charlotte$date, 10)
+head(raleigh$date, 10)
+
+range(charlotte$date, na.rm = TRUE)
+range(raleigh$date, na.rm = TRUE)
+
+sum(is.na(charlotte$date))
+sum(is.na(raleigh$date))
+```
+```{r}
+charlotte$date <- as.Date(charlotte$date, format = "%Y-%m-%d")
+raleigh$date <- as.Date(raleigh$date, format = "%Y-%m-%d")
+str(charlotte$date)
+str(raleigh$date)
+
+```
+
+
+
+```{r}
+charlotte$age_group <- cut(
+  charlotte$subject_age,
+  breaks = c(-Inf, 25, 50, Inf),
+  labels = c("16-25", "25-50", "50+"),
+  right = FALSE
+)
+raleigh$age_group <- cut(
+  raleigh$subject_age,
+  breaks = c(-Inf, 25, 50, Inf),
+  labels = c("16-25", "25-50", "50+"),
+  right = FALSE
+)
+
+```
+
+```{r}
+charlotte_clean <- charlotte %>%
+  filter(!is.na(subject_sex) & !is.na(age_group))
+raleigh_clean <- raleigh %>%
+  filter(!is.na(subject_sex) & !is.na(age_group))
+```
+
+```{r}
+nrow(charlotte_clean)
+nrow(raleigh_clean)
+
+```
+```{r}
+charlotte_demographics <- table(charlotte_clean$subject_sex, charlotte_clean$age_group)
+
+raleigh_demographics <- table(raleigh_clean$subject_sex, raleigh_clean$age_group)
+
+charlotte_demographics
+raleigh_demographics
+
+```
+```{r}
+charlotte_outcomes <- charlotte_clean %>%
+  group_by(subject_sex, age_group) %>%
+  summarise(
+    arrests = sum(arrest_made, na.rm = TRUE),
+    citations = sum(citation_issued, na.rm = TRUE),
+    warnings = sum(warning_issued, na.rm = TRUE),
+    total_stops = n()
+  )
+
+raleigh_outcomes <- raleigh_clean %>%
+  group_by(subject_sex, age_group) %>%
+  summarise(
+    arrests = sum(arrest_made, na.rm = TRUE),
+    citations = sum(citation_issued, na.rm = TRUE),
+    warnings = sum(warning_issued, na.rm = TRUE),
+    total_stops = n()
+  )
+
+charlotte_outcomes
+raleigh_outcomes
+
+```
+
+```{r}
+charlotte_proportions <- charlotte_clean %>%
+  group_by(subject_sex, age_group) %>%
+  summarise(
+    arrest_rate = sum(arrest_made, na.rm = TRUE) / n(),
+    citation_rate = sum(citation_issued, na.rm = TRUE) / n(),
+    warning_rate = sum(warning_issued, na.rm = TRUE) / n(),
+    .groups = "drop"
+  )
+
+raleigh_proportions <- raleigh_clean %>%
+  group_by(subject_sex, age_group) %>%
+  summarise(
+    arrest_rate = sum(arrest_made, na.rm = TRUE) / n(),
+    citation_rate = sum(citation_issued, na.rm = TRUE) / n(),
+    warning_rate = sum(warning_issued, na.rm = TRUE) / n(),
+    .groups = "drop"
+  )
+
+charlotte_proportions
+raleigh_proportions
+```
+Gender Disparities:
+1. Males have higher arrest rates across all age groups, indicating possible policing disparities.
+2. Females generally receive more warnings and slightly fewer citations compared to males.
+
+Age-Related Trends:
+1. Arrest rates decrease with age for both genders.
+2. Citation rates remain stable across age groups but show slight declines with increasing age.
+3. Warnings increase with age for both genders, especially for females.
+
+```{r}
+
+charlotte_proportions$city <- "Charlotte"
+raleigh_proportions$city <- "Raleigh"
+combined_proportions <- rbind(charlotte_proportions, raleigh_proportions)
+
+ggplot(combined_proportions, aes(x = age_group, fill = subject_sex)) +
+  geom_bar(aes(y = arrest_rate), stat = "identity", position = "dodge") +
+  facet_wrap(~ city) +
+  labs(
+    title = "Arrest Rate by Gender and Age Group",
+    x = "Age Group",
+    y = "Arrest Rate",
+    fill = "Gender"
+  ) +
+  theme_minimal()
+
+ggplot(combined_proportions, aes(x = age_group, fill = subject_sex)) +
+  geom_bar(aes(y = citation_rate), stat = "identity", position = "dodge") +
+  facet_wrap(~ city) +
+  labs(
+    title = "Citation Rate by Gender and Age Group",
+    x = "Age Group",
+    y = "Citation Rate",
+    fill = "Gender"
+  ) +
+  theme_minimal()
+
+ggplot(combined_proportions, aes(x = age_group, fill = subject_sex)) +
+  geom_bar(aes(y = warning_rate), stat = "identity", position = "dodge") +
+  facet_wrap(~ city) +
+  labs(
+    title = "Warning Rate by Gender and Age Group",
+    x = "Age Group",
+    y = "Warning Rate",
+    fill = "Gender"
+  ) +
+  theme_minimal()
+
+```
+Hypotheses for the Chi-Squared Test:
+
+Null Hypothesis (H$_0$): Stop outcomes are independent of gender and age group (no disparities).
+Alternative Hypothesis (H$_A$): Stop outcomes are dependent on gender and age group (disparities exist).
+
+```{r}
+charlotte_table <- charlotte_clean %>%
+  group_by(subject_sex, age_group) %>%
+  summarise(
+    arrests = sum(arrest_made, na.rm = TRUE),
+    citations = sum(citation_issued, na.rm = TRUE),
+    warnings = sum(warning_issued, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+raleigh_table <- raleigh_clean %>%
+  group_by(subject_sex, age_group) %>%
+  summarise(
+    arrests = sum(arrest_made, na.rm = TRUE),
+    citations = sum(citation_issued, na.rm = TRUE),
+    warnings = sum(warning_issued, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+charlotte_matrix <- as.matrix(charlotte_table[, 3:5])
+raleigh_matrix <- as.matrix(raleigh_table[, 3:5])
+
+charlotte_test <- chisq.test(charlotte_matrix)
+raleigh_test <- chisq.test(raleigh_matrix)
+
+charlotte_test
+raleigh_test
+
+```
+1. For both Charlotte and Raleigh, the p-value is far below the conventional significance level of 0.05.
+2. This means we reject the null hypothesis: stop outcomes (arrests, citations, warnings) are not independent of gender and age group.
+3. These results indicate that gender and age group play a significant role in determining stop outcomes.
+4. For example, males in younger age groups may be disproportionately more likely to be arrested, as observed in the previous analyses.
+
+```{r}
+charlotte_clean$party_in_power <- ifelse(
+  charlotte_clean$date < as.Date("2001-01-01"), "Democratic",
+  ifelse(charlotte_clean$date >= as.Date("2001-01-01") & charlotte_clean$date <= as.Date("2008-12-31"), "Republican", "Democratic")
+)
+
+raleigh_clean$party_in_power <- ifelse(
+  raleigh_clean$date < as.Date("2001-01-01"), "Democratic",
+  ifelse(raleigh_clean$date >= as.Date("2001-01-01") & raleigh_clean$date <= as.Date("2008-12-31"), "Republican", "Democratic")
+)
+
+table(charlotte_clean$party_in_power)
+table(raleigh_clean$party_in_power)
+
+```
+```{r}
+charlotte_party_analysis <- charlotte_clean %>%
+  group_by(subject_sex, age_group, party_in_power) %>%
+  summarise(
+    arrest_rate = sum(arrest_made, na.rm = TRUE) / n(),
+    citation_rate = sum(citation_issued, na.rm = TRUE) / n(),
+    warning_rate = sum(warning_issued, na.rm = TRUE) / n(),
+    .groups = "drop"
+  )
+
+raleigh_party_analysis <- raleigh_clean %>%
+  group_by(subject_sex, age_group, party_in_power) %>%
+  summarise(
+    arrest_rate = sum(arrest_made, na.rm = TRUE) / n(),
+    citation_rate = sum(citation_issued, na.rm = TRUE) / n(),
+    warning_rate = sum(warning_issued, na.rm = TRUE) / n(),
+    .groups = "drop"
+  )
+
+charlotte_party_analysis
+raleigh_party_analysis
+
+```
+
+```{r}
+charlotte_party_table <- charlotte_clean %>%
+  group_by(party_in_power) %>%
+  summarise(
+    arrests = sum(arrest_made, na.rm = TRUE),
+    citations = sum(citation_issued, na.rm = TRUE),
+    warnings = sum(warning_issued, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+charlotte_party_matrix <- as.matrix(charlotte_party_table[, 2:4])
+
+charlotte_party_test <- chisq.test(charlotte_party_matrix)
+
+raleigh_party_table <- raleigh_clean %>%
+  group_by(party_in_power) %>%
+  summarise(
+    arrests = sum(arrest_made, na.rm = TRUE),
+    citations = sum(citation_issued, na.rm = TRUE),
+    warnings = sum(warning_issued, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+raleigh_party_matrix <- as.matrix(raleigh_party_table[, 2:4])
+raleigh_party_test <- chisq.test(raleigh_party_matrix)
+
+charlotte_party_test
+raleigh_party_test
+
+```
+Null Hypothesis (H$_0$):
+Stop outcomes (arrests, citations, warnings) are independent of the party in power.
+Alternative Hypothesis (H$_A$):
+Stop outcomes (arrests, citations, warnings) are dependent on the party in power.
+
+The p-values for both Charlotte and Raleigh are extremely small (< 2.2e-16), leading us to reject the null hypothesis. This means:
+
+Stop outcomes are not independent of the party in power.
+```{r}
+charlotte_party_analysis$city <- "Charlotte"
+raleigh_party_analysis$city <- "Raleigh"
+combined_party_analysis <- rbind(charlotte_party_analysis, raleigh_party_analysis)
+
+# Arrest Rate Visualization
+ggplot(combined_party_analysis, aes(x = age_group, y = arrest_rate, fill = party_in_power)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~ city + subject_sex) +
+  labs(
+    title = "Arrest Rate by Political Party, Gender, and Age Group",
+    x = "Age Group",
+    y = "Arrest Rate",
+    fill = "Party in Power"
+  ) +
+  theme_minimal()
+
+ggplot(combined_party_analysis, aes(x = age_group, y = citation_rate, fill = party_in_power)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~ city + subject_sex) +
+  labs(
+    title = "Citation Rate by Political Party, Gender, and Age Group",
+    x = "Age Group",
+    y = "Citation Rate",
+    fill = "Party in Power"
+  ) +
+  theme_minimal()
+
+ggplot(combined_party_analysis, aes(x = age_group, y = warning_rate, fill = party_in_power)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~ city + subject_sex) +
+  labs(
+    title = "Warning Rate by Political Party, Gender, and Age Group",
+    x = "Age Group",
+    y = "Warning Rate",
+    fill = "Party in Power"
+  ) +
+  theme_minimal()
+
+```
+
